@@ -1,13 +1,14 @@
 from train import train
 import torch
-import torch
+import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
 from encoder import VisionTransformerEncoder
-from predictor import Predictor
+from predictor import VisionPredictor
 from mask import IJEPA_Masking
 from dataset import IJEPA_Dataset
+from  inference import ijepa_inference
 
 IMG_SIZE = 224 # Standard image size for ViT
 PATCH_SIZE = 16 # Standard patch size
@@ -17,6 +18,7 @@ NUM_LAYERS = 12 # Number of transformer blocks
 NUM_HEADS = 12 # Number of attention heads
 MLP_RATIO = 4. # MLP hidden dimension factor
 DROPOUT = 0.1
+VISION_PREDICTOR_NUM_LAYERS = 4 
 
 # 6. Instantiate the VisionTransformerEncoder for the ContextEncoder
 context_encoder_vit = VisionTransformerEncoder(
@@ -30,8 +32,25 @@ context_encoder_vit = VisionTransformerEncoder(
     dropout=DROPOUT,
     include_pooling=True
 )
+target_encoder_vit = VisionTransformerEncoder(
+    img_size=IMG_SIZE,
+    patch_size=PATCH_SIZE,
+    in_channels=IN_CHANNELS,
+    embed_dim=EMBED_DIM,
+    num_layers=NUM_LAYERS,
+    num_heads=NUM_HEADS,
+    mlp_ratio=MLP_RATIO,
+    dropout=DROPOUT,
+    include_pooling=True
+)
 
-predictor_vit = Predictor(input_dim=CONTEXT_ENCODER_OUTPUT_DIM, hidden_dim=PREDICTOR_HIDDEN_DIM, output_dim=PREDICTOR_OUTPUT_DIM)
+predictor_vit = VisionPredictor(
+    embed_dim=EMBED_DIM, # Using the global EMBED_DIM for consistency
+    num_layers=VISION_PREDICTOR_NUM_LAYERS,
+    num_heads=NUM_HEADS,
+    mlp_ratio=MLP_RATIO,
+    dropout=DROPOUT
+)
 
 
 transform_cifar_base = transforms.Compose([
@@ -84,3 +103,19 @@ optimizer = torch.optim.AdamW(list(context_encoder_vit.parameters()) + list(pred
 loss_function = nn.MSELoss()
 
 train(epochs,context_encoder_vit,predictor_vit,ijepa_train_dataloader,optimizer,target_encoder_vit,loss_function,device)
+
+# Load the CIFAR10 test dataset (raw, to get PIL images)
+cifar10_test = torchvision.datasets.CIFAR10(
+    root='./data', train=False, download=True, transform=None # No transform here, we want PIL images
+)
+
+# Get a sample image (e.g., the first image from the test set)
+sample_image_pil, sample_label = cifar10_test[0]
+
+print(f"Sample image loaded (PIL Image) with label: {sample_label}")
+
+# Perform inference
+image_embedding = ijepa_inference(sample_image_pil, context_encoder_vit, device)
+
+print(f"Embedding shape: {image_embedding.shape}")
+print(f"Sample embedding (first 5 values): {image_embedding.flatten()[:5]}")
